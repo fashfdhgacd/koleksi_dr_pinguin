@@ -1,4 +1,5 @@
 const hookPoster = require("./poster-hook");
+const shareLines = require("./share-message");
 function pickEnv(keys) {
   for (const key of keys) {
     const val = process.env[key];
@@ -176,8 +177,7 @@ async function handleShare(env, chatId, opt) {
   if (!pool.length) { await reply(env, chatId, "Kategori " + catLabel + " kosong.", MENU_KEYBOARD); return; }
   for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp; }
   const take = pool.slice(0, n);
-  const host = String(env.PUBLIC_HOST || "https://koleksidrpinguin.com").replace(/\/$/, "");
-  const lines = take.map(function (x) { return "\u25b6 " + x.title + "\n" + host + "/v/" + x.key; });
+  const lines = shareLines(take);
   await reply(env, chatId, lines.join("\n\n"), MENU_KEYBOARD);
 }
 function isFolderLine(t) { return /^[\uD83D\uDCC1\uD83D\uDCC2]/.test(String(t || "").trim()) || /\bhentai\s*eng\b/i.test(String(t || "")); }

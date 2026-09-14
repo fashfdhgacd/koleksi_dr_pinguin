@@ -1,0 +1,40 @@
+const mem = {};
+async function splash(id) {
+  if (mem[id] && Date.now() - mem[id].t < 6 * 60 * 60 * 1000) return mem[id].u;
+  const login = process.env.STREAMTAPE_LOGIN || process.env.TAPE_LOGIN || "";
+  const key = process.env.STREAMTAPE_KEY || process.env.TAPE_KEY || "";
+  if (login && key) {
+    try {
+      const r = await fetch("https://api.streamtape.com/file/getsplash?login=" + encodeURIComponent(login) + "&key=" + encodeURIComponent(key) + "&file=" + encodeURIComponent(id));
+      const j = await r.json();
+      if (j && j.status === 200 && j.result) {
+        mem[id] = { t: Date.now(), u: String(j.result) };
+        return mem[id].u;
+      }
+    } catch (_) {}
+  }
+  try {
+    const r = await fetch("https://streamtape.com/e/" + id + "/", { headers: { "user-agent": "Mozilla/5.0", accept: "text/html" } });
+    const html = await r.text();
+    const m = html.match(/https:\/\/thumb\.tapecontent\.net\/thumb\/[^"'\s]+/);
+    if (m) {
+      mem[id] = { t: Date.now(), u: m[0].replace(/\\/g, "") };
+      return mem[id].u;
+    }
+  } catch (_) {}
+  return "";
+}
+module.exports = async function handler(req, res) {
+  const id = String((req.query && req.query.id) || "").replace(/[^A-Za-z0-9_-]/g, "");
+  if (!id) { res.status(400).end(); return; }
+  try {
+    const url = await splash(id);
+    if (url) {
+      res.writeHead(302, { Location: url, "Cache-Control": "public, s-maxage=86400" });
+      res.end();
+      return;
+    }
+  } catch (_) {}
+  res.writeHead(302, { Location: "/logo.png", "Cache-Control": "public, max-age=60" });
+  res.end();
+};

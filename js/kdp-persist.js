@@ -1,0 +1,1 @@
+(function () { /* reverted: no redirect */ })();

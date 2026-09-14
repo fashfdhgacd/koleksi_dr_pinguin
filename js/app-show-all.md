@@ -1,0 +1,1 @@
+isHiddenHome=false; indoPool=allVideos; All uses mainPool. Apply in js/app.js.

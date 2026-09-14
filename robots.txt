@@ -1,0 +1,20 @@
+User-agent: *
+Allow: /
+Allow: /v/
+Allow: /putarin
+Allow: /campur
+Allow: /kategori/
+Allow: /privasi
+Allow: /syarat
+Allow: /dmca
+Allow: /kontak
+Allow: /sitemap.xml
+Allow: /sitemap-v.xml
+Allow: /api/sitemap-v
+Allow: /api/thumb
+Allow: /api/poster
+Disallow: /admin.html
+Disallow: /api/
+
+Sitemap: https://koleksidrpinguin.com/sitemap.xml
+Sitemap: https://koleksidrpinguin.com/sitemap-v.xml

@@ -1,0 +1,9 @@
+{
+  "name": "koleksi-dr-pinguin",
+  "version": "1.1.0",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"require('./lib/kdp'); console.log('kdp ok')\"",
+    "check:safe": "node -e \"const k=require('./lib/kdp'); const d=require('./data/videos.json'); console.log(d.filter(k.isUnsafe).length+' flagged')\""
+  }
+}

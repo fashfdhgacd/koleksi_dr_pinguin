@@ -1,0 +1,55 @@
+{
+  "framework": null,
+  "buildCommand": "",
+  "installCommand": "",
+  "redirects": [
+    { "source": "/putarin", "destination": "/?cat=jav", "permanent": true },
+    { "source": "/putarin/", "destination": "/?cat=jav", "permanent": true },
+    { "source": "/campur", "destination": "/", "permanent": true },
+    { "source": "/campur/", "destination": "/", "permanent": true },
+    { "source": "/mix", "destination": "/", "permanent": true },
+    { "source": "/mix/", "destination": "/", "permanent": true },
+    { "source": "/mumu", "destination": "/", "permanent": true },
+    { "source": "/mumu/", "destination": "/", "permanent": true }
+  ],
+  "rewrites": [
+    { "source": "/privasi", "destination": "/privasi.html" },
+    { "source": "/privasi/", "destination": "/privasi.html" },
+    { "source": "/syarat", "destination": "/syarat.html" },
+    { "source": "/syarat/", "destination": "/syarat.html" },
+    { "source": "/dmca", "destination": "/dmca.html" },
+    { "source": "/dmca/", "destination": "/dmca.html" },
+    { "source": "/kontak", "destination": "/kontak.html" },
+    { "source": "/kontak/", "destination": "/kontak.html" },
+    { "source": "/kategori/:slug", "destination": "/index.html" },
+    { "source": "/kategori/:slug/", "destination": "/index.html" },
+    { "source": "/p/:id.jpg", "destination": "/api/thumb?h=x&id=:id" },
+    { "source": "/p/:id", "destination": "/api/thumb?h=x&id=:id" },
+    { "source": "/v/:id", "destination": "/api/watch?id=:id" },
+    { "source": "/v/:id/", "destination": "/api/watch?id=:id" },
+    { "source": "/sitemap-v.xml", "destination": "/api/sitemap-v" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), payment=()" },
+        { "key": "X-Frame-Options", "value": "SAMEORIGIN" }
+      ]
+    },
+    {
+      "source": "/css/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400, stale-while-revalidate=604800" }]
+    },
+    {
+      "source": "/js/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400, stale-while-revalidate=604800" }]
+    },
+    {
+      "source": "/data/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=60, stale-while-revalidate=600" }]
+    }
+  ]
+}

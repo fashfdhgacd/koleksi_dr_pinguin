@@ -12,7 +12,7 @@ function getEnv() {
     BOT_TOKEN: pickEnv(["BOT_TOKEN", "BOT_TOKENN", "TELEGRAM_BOT_TOKEN"]),
     GH_TOKEN: pickEnv(["GH_TOKEN", "GH_TOKENN", "GITHUB_TOKEN"]),
     GH_OWNER: pickEnv(["GH_OWNER", "GH_OWNERR", "GITHUB_OWNER"]) || "fashfdhgacd",
-    GH_REPO: pickEnv(["GH_REPO", "GH_REPOO", "GITHUB_REPO"]) || "koleksi-dr-pinguin",
+    GH_REPO: pickEnv(["GH_REPO", "GH_REPOO", "GITHUB_REPO"]) || "koleksi_dr_pinguin",
     GH_PATH: pickEnv(["GH_PATH", "GH_PATHH"]) || "data/videos.json",
     GH_BRANCH: pickEnv(["GH_BRANCH", "GH_BRANCHH"]) || "main",
     TELEGRAM_USER_ID: pickEnv(["TELEGRAM_USER_ID", "TELEGRAM_ADMIN_ID"]) || "7747474006",
@@ -39,7 +39,29 @@ const MENU_KEYBOARD = {
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   const env = getEnv();
-  if (req.method === "GET") return res.status(200).json({ ok: true, service: "telegram-webhook", ready: Boolean(env.BOT_TOKEN), hasBot: Boolean(env.BOT_TOKEN), hasGh: Boolean(env.GH_TOKEN) });
+  if (req.method === "GET") {
+    return res.status(200).json({
+      ok: true,
+      service: "telegram-webhook",
+      host: env.PUBLIC_HOST || "https://www.koleksidrpinguin.com",
+      modes: ["upload", "share", "keyboard"],
+      ready: Boolean(env.BOT_TOKEN && env.GH_TOKEN),
+      upload: {
+        botToken: Boolean(env.BOT_TOKEN),
+        adminId: Boolean(env.TELEGRAM_USER_ID),
+        ghToken: Boolean(env.GH_TOKEN),
+        ghOwner: env.GH_OWNER,
+        ghRepo: env.GH_REPO,
+        ghAccess: env.GH_TOKEN ? "push_ok" : "missing",
+        ghPrivate: false,
+        streamtape: true,
+        putarin: true,
+        indoav: true,
+        userbokep: true,
+        canWriteJson: Boolean(env.GH_TOKEN && env.GH_OWNER && env.GH_REPO)
+      }
+    });
+  }
   if (req.method !== "POST") return res.status(405).json({ ok: false });
   const update = typeof req.body === "string" ? (function(){try{return JSON.parse(req.body)}catch(e){return {}}}()) : (req.body || {});
   try { await handleUpdate(update, env); return res.status(200).json({ ok: true }); }
@@ -47,7 +69,7 @@ module.exports = async function handler(req, res) {
 };
 function isBlockedHost(u) { return /vicek\.id|exastream|mumu\.watch|mumustream/i.test(String(u || "")); }
 function isAllowedHost(u) {
-  return /videy\.co|indoav\.|userbokep\.com|putarin\.(com|biz|xyz)|puterin\.(com|biz|xyz)|luluvdo\.com|lulustream\.com|luluvid\.com|lulu\.st|streamtape\.com|strcloud/i.test(String(u || ""));
+  return /videy\.co|indoav\.|userbokep|putarin|puterin|luluvdo|lulustream|luluvid|lulu\.st|streamtape|strcloud/i.test(String(u || ""));
 }
 function parseShareCount(text, fallback) {
   const m = String(text || "").toLowerCase().match(/\b(5|10|15|20|25|30)\b/);
@@ -100,7 +122,7 @@ async function handleUpdate(update, env) {
     await handleShare(env, chatId, { count: n || 0, cat: cat || "" }); return;
   }
   const items = (await parseNamedLinks(text)).filter(function (it) { return !isBlockedHost(it.embed) && !isBlockedHost(it.direct); });
-  if (!items.length) { await reply(env, chatId, "Kirim link Lulu / Streamtape / IndoAV.", MENU_KEYBOARD); return; }
+  if (!items.length) { await reply(env, chatId, "Kirim link IndoAV / UserBokep / Puterin / Streamtape / Lulu / Videy.", MENU_KEYBOARD); return; }
   if (!env.GH_TOKEN) { await reply(env, chatId, "Upload butuh GH_TOKEN."); return; }
   try {
     const groups = groupUploads(items);
@@ -297,7 +319,6 @@ async function putFileViaGit(env, repo, path, text, message) {
 }
 async function mergeAndPush(env, repo, path, items) {
   const videos = await loadJsonFile(env, repo, path);
-  if (path === "data/videos.json" && videos.length < 100) throw new Error("videos.json cuma " + videos.length + " item. Abort.");
   const exist = new Set(videos.map(videoKey));
   let added = 0, skipped = 0;
   const fresh = [];

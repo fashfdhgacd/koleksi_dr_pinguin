@@ -32,14 +32,58 @@ function findVideo(id) {
   const needle = String(id || "").toLowerCase();
   const lists = ["putarin.json", "videos.json", "campur.json"];
   for (const name of lists) {
-    const hit = readList(name).find(function (v) { return keyOf(v).toLowerCase() === needle; });
+    const hit = readList(name).find(function (v) {
+      return keyOf(v).toLowerCase() === needle;
+    });
     if (hit) return hit;
   }
   return null;
 }
 
+/** Deteksi JAV/Hentai — harus cover semua ~600+ judul */
+function isJav(title) {
+  const t = String(title || "").trim();
+  if (!t) return false;
+  const u = t.toUpperCase();
+
+  // Kode klasik IPZZ-567, SSIS-001, RKI-707, dll
+  if (/\b([A-Z]{2,8})[-_]?\d{2,5}\b/.test(u)) return true;
+
+  // Provider / studio
+  if (
+    /\b(FC2|HEYZO|CARIB|CARIBBEAN|1PONDO|PACO|TOKYO.?HOT|KIN8|GACHI|AVOP|MUGEN|HEYDOUGA|PRESTIGE|SOD|MOODYZ|IDEA.?POCKET|E-BODY|FITCH|OPPAI|WANZ|ATTACKERS|S1\b|FALENO|MADONNA)\b/.test(
+      u
+    )
+  )
+    return true;
+
+  // Keyword
+  if (/\b(JAV|HENTAI|UNCENSORED|CENSORED|AV JEPANG|JEPANG AV|JAPAN AV)\b/.test(u)) return true;
+
+  // Hentai anime: judul + Eps XX
+  if (
+    /\b(EPS?|EPISODE)\s*\d{1,3}\b/i.test(t) &&
+    /[a-z].*[a-z]/i.test(t) &&
+    !/\b(bokep|indo|hijab|jilbab|tante|viral)\b/i.test(t)
+  )
+    return true;
+
+  // Heuristic judul Jepang panjang
+  const words = t.split(/\s+/).filter(Boolean);
+  if (
+    words.length >= 4 &&
+    !/\b(bokep|indo|hijab|jilbab|tante|janda|viral|live|abg|sma|colmek|doggy|gangbang|istri|suami|kosan|hotel)\b/i.test(t) &&
+    /\b(wa|no|ni|to|ga|wo|de|desu|chan|kun|san|sama|sensei|onee|imouto|ane|otoko|onna|ecchi)\b/i.test(t)
+  )
+    return true;
+
+  return false;
+}
+
 function javCovers(title) {
-  const m = String(title || "").toUpperCase().match(/\b([A-Z]{2,7})-?(\d{3,4})\b/);
+  const m = String(title || "")
+    .toUpperCase()
+    .match(/\b([A-Z]{2,8})[-_]?(\d{2,5})\b/);
   if (!m) return [];
   const maker = m[1].toLowerCase();
   const n3 = m[2].padStart(3, "0");
@@ -57,7 +101,8 @@ async function scrapeImages(id) {
   const pages = [
     "https://puterin.biz/v/" + id,
     "https://putarin.xyz/e/" + id,
-    "https://panel.putarin.com/e/" + id
+    "https://panel.putarin.com/e/" + id,
+    "https://panel.putarin.com/v/" + id
   ];
   const found = [];
   for (const url of pages) {
@@ -82,7 +127,9 @@ async function scrapeImages(id) {
 async function sendImage(res, url) {
   if (dead(url)) return false;
   const ctrl = new AbortController();
-  const t = setTimeout(function () { ctrl.abort(); }, 6000);
+  const t = setTimeout(function () {
+    ctrl.abort();
+  }, 6000);
   try {
     const r = await fetch(url, {
       headers: { "user-agent": "Mozilla/5.0", accept: "image/*" },
@@ -125,3 +172,7 @@ module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "public, max-age=60");
   res.status(200).end(PLACEHOLDER);
 };
+
+// Export helper biar script lain bisa pakai aturan yang sama
+module.exports.isJav = isJav;
+module.exports.javCovers = javCovers;

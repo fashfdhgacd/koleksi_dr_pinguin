@@ -5,6 +5,9 @@ const PLACEHOLDER = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#141414"/><circle cx="320" cy="180" r="36" fill="#ff9000"/><polygon points="310,164 342,180 310,196" fill="#111"/></svg>'
 );
 
+let mapCache = { t: 0, map: {} };
+const MAP_TTL = 15 * 60 * 1000;
+
 function dead(u) {
   return !u || /embedan\.com|cdnhlsplayer\.lat|logo\.png$/i.test(String(u));
 }
@@ -13,7 +16,9 @@ function keyOf(v) {
   const u = String((v && (v.embed || v.direct || v.id || "")) || "");
   try {
     const url = new URL(u);
-    return String(url.searchParams.get("id") || url.pathname.split("/").filter(Boolean).pop() || "").replace(/\.(mp4|mov)$/i, "");
+    return String(
+      url.searchParams.get("id") || url.pathname.split("/").filter(Boolean).pop() || ""
+    ).replace(/\.(mp4|mov)$/i, "");
   } catch (_) {
     return String(u.split("/").pop() || "").replace(/\.(mp4|mov)$/i, "");
   }
@@ -28,6 +33,21 @@ function readList(name) {
   }
 }
 
+function loadPosterMap() {
+  if (mapCache.map && Object.keys(mapCache.map).length && Date.now() - mapCache.t < MAP_TTL) {
+    return mapCache.map;
+  }
+  const map = {};
+  for (const name of ["posters.json", "latest-posters.json"]) {
+    try {
+      const d = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", name), "utf8"));
+      if (d && typeof d === "object" && !Array.isArray(d)) Object.assign(map, d);
+    } catch (_) {}
+  }
+  mapCache = { t: Date.now(), map: map };
+  return map;
+}
+
 function findVideo(id) {
   const needle = String(id || "").toLowerCase();
   const lists = ["putarin.json", "videos.json", "campur.json"];
@@ -40,43 +60,33 @@ function findVideo(id) {
   return null;
 }
 
-/** Deteksi JAV/Hentai — harus cover semua ~600+ judul */
 function isJav(title) {
   const t = String(title || "").trim();
   if (!t) return false;
   const u = t.toUpperCase();
-
-  // Kode klasik IPZZ-567, SSIS-001, RKI-707, dll
   if (/\b([A-Z]{2,8})[-_]?\d{2,5}\b/.test(u)) return true;
-
-  // Provider / studio
   if (
     /\b(FC2|HEYZO|CARIB|CARIBBEAN|1PONDO|PACO|TOKYO.?HOT|KIN8|GACHI|AVOP|MUGEN|HEYDOUGA|PRESTIGE|SOD|MOODYZ|IDEA.?POCKET|E-BODY|FITCH|OPPAI|WANZ|ATTACKERS|S1\b|FALENO|MADONNA)\b/.test(
       u
     )
   )
     return true;
-
-  // Keyword
   if (/\b(JAV|HENTAI|UNCENSORED|CENSORED|AV JEPANG|JEPANG AV|JAPAN AV)\b/.test(u)) return true;
-
-  // Hentai anime: judul + Eps XX
   if (
     /\b(EPS?|EPISODE)\s*\d{1,3}\b/i.test(t) &&
     /[a-z].*[a-z]/i.test(t) &&
     !/\b(bokep|indo|hijab|jilbab|tante|viral)\b/i.test(t)
   )
     return true;
-
-  // Heuristic judul Jepang panjang
   const words = t.split(/\s+/).filter(Boolean);
   if (
     words.length >= 4 &&
-    !/\b(bokep|indo|hijab|jilbab|tante|janda|viral|live|abg|sma|colmek|doggy|gangbang|istri|suami|kosan|hotel)\b/i.test(t) &&
+    !/\b(bokep|indo|hijab|jilbab|tante|janda|viral|live|abg|sma|colmek|doggy|gangbang|istri|suami|kosan|hotel)\b/i.test(
+      t
+    ) &&
     /\b(wa|no|ni|to|ga|wo|de|desu|chan|kun|san|sama|sensei|onee|imouto|ane|otoko|onna|ecchi)\b/i.test(t)
   )
     return true;
-
   return false;
 }
 
@@ -124,6 +134,15 @@ async function scrapeImages(id) {
   return found;
 }
 
+function setHitCache(res) {
+  res.setHeader(
+    "Cache-Control",
+    "public, max-age=604800, s-maxage=604800, stale-while-revalidate=2592000, immutable"
+  );
+  res.setHeader("CDN-Cache-Control", "public, max-age=604800");
+  res.setHeader("Vercel-CDN-Cache-Control", "public, max-age=604800");
+}
+
 async function sendImage(res, url) {
   if (dead(url)) return false;
   const ctrl = new AbortController();
@@ -142,7 +161,7 @@ async function sendImage(res, url) {
     const ct = r.headers.get("content-type") || "image/jpeg";
     if (!/^image\//i.test(ct) && !/jpeg|jpg|png|webp|gif/i.test(ct)) return false;
     res.setHeader("Content-Type", ct.split(";")[0]);
-    res.setHeader("Cache-Control", "public, s-maxage=604800, stale-while-revalidate=2592000");
+    setHitCache(res);
     res.status(200).end(buf);
     return true;
   } catch (_) {
@@ -156,23 +175,28 @@ module.exports = async function handler(req, res) {
   try {
     const id = String((req.query && req.query.id) || "").replace(/[^A-Za-z0-9_-]/g, "");
     if (id) {
+      // 1) Map posters.json dulu (hasil sync) — paling cepat
+      const map = loadPosterMap();
+      if (map[id] && (await sendImage(res, map[id]))) return;
+
       const video = findVideo(id);
       const title = video && video.title ? video.title : "";
       const localPoster = video && (video.poster || video.thumb || video.thumbnail);
+
       const candidates = []
-        .concat(javCovers(title))
         .concat(dead(localPoster) ? [] : [localPoster])
+        .concat(javCovers(title))
         .concat(await scrapeImages(id));
+
       for (let i = 0; i < candidates.length; i++) {
         if (await sendImage(res, candidates[i])) return;
       }
     }
   } catch (_) {}
   res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
-  res.setHeader("Cache-Control", "public, max-age=60");
+  res.setHeader("Cache-Control", "public, max-age=60, s-maxage=60");
   res.status(200).end(PLACEHOLDER);
 };
 
-// Export helper biar script lain bisa pakai aturan yang sama
 module.exports.isJav = isJav;
 module.exports.javCovers = javCovers;

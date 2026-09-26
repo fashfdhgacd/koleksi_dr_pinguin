@@ -1,29 +1,43 @@
 (function () {
   var map = {};
   window.KDP_POSTERS = map;
-  window.kdpPoster = function (id) { return map[id] || ""; };
+  window.kdpPoster = function (id) {
+    return map[id] || "";
+  };
 
   function idFrom(src) {
     if (!src) return "";
     try {
       var u = new URL(src, location.href);
-      return String(u.searchParams.get("id") || (u.pathname.split("/").filter(Boolean).pop() || "")).replace(/\.(mp4|mov)$/i, "");
+      return String(
+        u.searchParams.get("id") || u.pathname.split("/").filter(Boolean).pop() || ""
+      ).replace(/\.(mp4|mov)$/i, "");
     } catch (_) {
       return String(src.split("/").pop() || "").replace(/\.(mp4|mov)$/i, "");
     }
   }
+
   function hostOf(src) {
     var s = String(src || "").toLowerCase();
     if (s.indexOf("userbokep") >= 0) return "userbokep";
     if (s.indexOf("indoav") >= 0) return "indoav";
+    if (s.indexOf("lulu") >= 0 || s.indexOf("streamtape") >= 0) return "lulu";
     return "";
   }
+
+  /**
+   * Prioritas URL poster:
+   * 1. Map langsung (CDN Putarin/anipop/dll) — paling cepat
+   * 2. Proxy /p/:id → /api/thumb (cache CDN 7 hari)
+   */
   function posterSrc(id, src) {
+    if (!id) return "";
+    if (map[id]) return map[id];
     var h = hostOf(src);
-    if (h && id) return "/api/thumb?h=" + h + "&id=" + encodeURIComponent(id);
-    if (id && map[id]) return map[id];
-    return "";
+    if (h) return "/api/thumb?h=" + encodeURIComponent(h) + "&id=" + encodeURIComponent(id);
+    return "/p/" + encodeURIComponent(id);
   }
+
   function applyCards(root) {
     if (!root) return;
     root.querySelectorAll(".video-card").forEach(function (card) {
@@ -32,21 +46,32 @@
       var src = "";
       if (media) src = media.getAttribute("src") || media.getAttribute("data-src") || "";
       src = src || card.getAttribute("data-embed") || "";
-      var id = idFrom(src);
+      var id = card.getAttribute("data-id") || idFrom(src);
       if (!id || /^\d+$/.test(id)) return;
       var url = posterSrc(id, src);
       if (!url) return;
+
       var img = document.createElement("img");
       img.alt = "";
       img.loading = "lazy";
       img.decoding = "async";
-      img.className = "absolute inset-0 w-full h-full object-cover bg-black pointer-events-none";
+      img.fetchPriority = "low";
+      img.className =
+        "absolute inset-0 w-full h-full object-cover bg-black pointer-events-none";
       img.src = url;
       img.onerror = function () {
-        if (img.dataset.fb) return;
-        img.dataset.fb = "1";
+        if (img.dataset.fb === "2") return;
+        // Fallback 1: proxy /api/thumb
+        if (!img.dataset.fb) {
+          img.dataset.fb = "1";
+          img.src = "/api/thumb?id=" + encodeURIComponent(id);
+          return;
+        }
+        // Fallback 2: logo
+        img.dataset.fb = "2";
         img.src = "/logo.png";
       };
+
       if (media && media.parentNode) media.parentNode.replaceChild(img, media);
       else {
         var box = card.querySelector(".relative, .ph, .aspect-video");
@@ -55,17 +80,34 @@
       card.setAttribute("data-poster-ok", "1");
     });
   }
+
   function boot() {
-    ["videoGrid", "trendingGrid", "searchResults"].forEach(function (id) {
-      var el = document.getElementById(id);
+    ["videoGrid", "trendingGrid", "searchResults"].forEach(function (gid) {
+      var el = document.getElementById(gid);
       if (!el) return;
       applyCards(el);
-      if (window.MutationObserver) new MutationObserver(function () { applyCards(el); }).observe(el, { childList: true, subtree: true });
+      if (window.MutationObserver) {
+        new MutationObserver(function () {
+          applyCards(el);
+        }).observe(el, { childList: true, subtree: true });
+      }
     });
   }
+
+  // Cache browser: default (ikut Cache-Control server), bukan no-store
+  function fetchJson(url) {
+    return fetch(url, { credentials: "same-origin" })
+      .then(function (r) {
+        return r.ok ? r.json() : {};
+      })
+      .catch(function () {
+        return {};
+      });
+  }
+
   Promise.all([
-    fetch("/data/posters.json", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; }),
-    fetch("/data/latest-posters.json", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; })
+    fetchJson("/data/posters.json"),
+    fetchJson("/data/latest-posters.json")
   ]).then(function (arr) {
     map = Object.assign({}, arr[0] || {}, arr[1] || {});
     window.KDP_POSTERS = map;

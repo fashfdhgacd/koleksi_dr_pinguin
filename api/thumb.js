@@ -1,29 +1,57 @@
+/** In-memory map cache — 15 menit (map jarang berubah) */
 let cache = { t: 0, map: {} };
+const MAP_TTL_MS = 15 * 60 * 1000;
+
 async function loadMaps() {
-  if (cache.map && Object.keys(cache.map).length && Date.now() - cache.t < 3 * 60 * 1000) return cache.map;
-  const base = "https://raw.githubusercontent.com/fashfdhgacd/koleksi-dr-pinguin/main/data/";
+  if (cache.map && Object.keys(cache.map).length && Date.now() - cache.t < MAP_TTL_MS) {
+    return cache.map;
+  }
+  // Baca lokal dulu (cepat di Vercel), fallback raw GitHub
   const map = {};
   try {
-    const a = await fetch(base + "posters.json", { cache: "no-store" });
-    const d = await a.json();
-    if (d && typeof d === "object" && !Array.isArray(d)) Object.assign(map, d);
+    const fs = require("fs");
+    const path = require("path");
+    for (const name of ["posters.json", "latest-posters.json"]) {
+      try {
+        const raw = fs.readFileSync(path.join(process.cwd(), "data", name), "utf8");
+        const d = JSON.parse(raw);
+        if (d && typeof d === "object" && !Array.isArray(d)) Object.assign(map, d);
+      } catch (_) {}
+    }
   } catch (_) {}
-  try {
-    const b = await fetch(base + "latest-posters.json", { cache: "no-store" });
-    const d = await b.json();
-    if (d && typeof d === "object" && !Array.isArray(d)) Object.assign(map, d);
-  } catch (_) {}
+
+  if (!Object.keys(map).length) {
+    const base = "https://raw.githubusercontent.com/fashfdhgacd/koleksi_dr_pinguin/main/data/";
+    try {
+      const a = await fetch(base + "posters.json");
+      const d = await a.json();
+      if (d && typeof d === "object" && !Array.isArray(d)) Object.assign(map, d);
+    } catch (_) {}
+    try {
+      const b = await fetch(base + "latest-posters.json");
+      const d = await b.json();
+      if (d && typeof d === "object" && !Array.isArray(d)) Object.assign(map, d);
+    } catch (_) {}
+  }
+
   cache = { t: Date.now(), map: map };
   return map;
 }
+
 function isLulu(host) {
   return /^(lulu|luluvdo|lulustream|ll|x|cdn)$/i.test(String(host || ""));
 }
+
 async function luluFromApi(id) {
   const key = String(process.env.LULUSTREAM_KEY || process.env.LULU_KEY || "").trim();
   if (!key || !id) return "";
   try {
-    const r = await fetch("https://lulustream.com/api/file/info?key=" + encodeURIComponent(key) + "&file_code=" + encodeURIComponent(id));
+    const r = await fetch(
+      "https://lulustream.com/api/file/info?key=" +
+        encodeURIComponent(key) +
+        "&file_code=" +
+        encodeURIComponent(id)
+    );
     const j = await r.json();
     const row = j && Array.isArray(j.result) ? j.result[0] : null;
     const img = row && (row.player_img || row.thumbnail || "");
@@ -32,6 +60,7 @@ async function luluFromApi(id) {
     return "";
   }
 }
+
 async function scrape(host, id) {
   const allow = {
     indoav: "https://tv1.indoav.app/e/",
@@ -45,13 +74,35 @@ async function scrape(host, id) {
   };
   const base = allow[String(host || "").toLowerCase()];
   if (!base || !id) return "";
-  const r = await fetch(base + id, { headers: { "user-agent": "Mozilla/5.0", accept: "text/html" } });
+  const r = await fetch(base + id, {
+    headers: { "user-agent": "Mozilla/5.0", accept: "text/html" }
+  });
   if (!r.ok) return "";
   const html = await r.text();
-  const m = html.match(/https:\/\/img\.lulucdn\.com\/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)/i) || html.match(/poster="(https:\/\/[^"\s]+)"/i) || html.match(/og:image[^>]+content="(https:\/\/[^"]+)"/i);
+  const m =
+    html.match(/https:\/\/img\.lulucdn\.com\/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)/i) ||
+    html.match(/poster="(https:\/\/[^"\s]+)"/i) ||
+    html.match(/og:image[^>]+content="(https:\/\/[^"]+)"/i);
   if (!m) return "";
   return m[1] || m[0];
 }
+
+function setHitHeaders(res) {
+  // 7 hari di CDN/browser, SWR 30 hari — poster hampir immutable per id
+  res.setHeader(
+    "Cache-Control",
+    "public, max-age=604800, s-maxage=604800, stale-while-revalidate=2592000, immutable"
+  );
+  res.setHeader("CDN-Cache-Control", "public, max-age=604800");
+  res.setHeader("Vercel-CDN-Cache-Control", "public, max-age=604800");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+}
+
+function setMissHeaders(res) {
+  // Placeholder pendek biar bisa retry cepat
+  res.setHeader("Cache-Control", "public, max-age=60, s-maxage=60");
+}
+
 async function sendImage(res, url, referer) {
   const r = await fetch(url, {
     headers: {
@@ -67,23 +118,28 @@ async function sendImage(res, url, referer) {
   const ct = r.headers.get("content-type") || "image/jpeg";
   if (!/^image\//i.test(ct) && !/webp|jpeg|jpg|png|gif/i.test(ct)) return false;
   res.setHeader("Content-Type", ct.split(";")[0]);
-  res.setHeader("Cache-Control", "public, s-maxage=86400, stale-while-revalidate=604800");
+  setHitHeaders(res);
   res.status(200).end(buf);
   return true;
 }
+
 module.exports = async function handler(req, res) {
   try {
     const q = req.query || {};
     const id = String(q.id || "").replace(/[^A-Za-z0-9_-]/g, "");
     const host = String(q.h || "").toLowerCase();
+
+    // 1) Map lokal / GitHub (paling cepat & hemat)
     if (id) {
       const map = await loadMaps();
       const mapped = map[id];
-      if (mapped && await sendImage(res, mapped)) return;
+      if (mapped && (await sendImage(res, mapped))) return;
     }
+
+    // 2) Lulu API + guess CDN
     if (isLulu(host) && id) {
       const apiImg = await luluFromApi(id);
-      if (apiImg && await sendImage(res, apiImg, "https://luluvdo.com/")) return;
+      if (apiImg && (await sendImage(res, apiImg, "https://luluvdo.com/"))) return;
       const guessed = [
         "https://img.lulucdn.com/" + id + "_xt.jpg",
         "https://img.lulucdn.com/" + id + ".jpg",
@@ -93,13 +149,18 @@ module.exports = async function handler(req, res) {
         if (await sendImage(res, u, "https://luluvdo.com/")) return;
       }
     }
+
+    // 3) Scrape hoster
     if (host && id) {
       const scraped = await scrape(host, id);
-      if (scraped && await sendImage(res, scraped, isLulu(host) ? "https://luluvdo.com/" : "")) return;
+      if (scraped && (await sendImage(res, scraped, isLulu(host) ? "https://luluvdo.com/" : "")))
+        return;
     }
   } catch (_) {}
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#141414"/><circle cx="320" cy="180" r="34" fill="#ff9000"/><polygon points="310,164 342,180 310,196" fill="#111"/></svg>';
+
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#141414"/><circle cx="320" cy="180" r="34" fill="#ff9000"/><polygon points="310,164 342,180 310,196" fill="#111"/></svg>';
   res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
-  res.setHeader("Cache-Control", "public, max-age=30");
+  setMissHeaders(res);
   res.status(200).send(svg);
 };
